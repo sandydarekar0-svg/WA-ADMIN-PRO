@@ -1,0 +1,412 @@
+const db = require('../models');
+const WhatsAppService = require('./whatsappService');
+const OfficialApiService = require('./officialApiService');
+const WebhookService = require('./webhookService');
+const CreditService = require('./creditService');
+
+class CampaignService {
+    constructor() {
+        this.runningCampaigns = new Map();
+    }
+
+    async startCampaign(campaignId, userId) {
+        console.log(`[Campaign] Starting campaign: ${campaignId}`);
+
+        const campaign = await db.Campaign.findByPk(campaignId);
+        if (!campaign) {
+            throw new Error('Campaign not found');
+        }
+
+        if (campaign.userId !== userId) {
+            throw new Error('Unauthorized');
+        }
+
+        if (campaign.status === 'running') {
+            throw new Error('Campaign is already running');
+        }
+
+        // Get user
+        const user = await db.User.findByPk(userId, {
+            include: [db.Plan]
+        });
+
+        if (!user) {
+            throw new Error('User not found');
+        }
+
+        // Check WhatsApp connection
+        let waService;
+        if (campaign.connectionType === 'official') {
+            if (!user.metaAccessToken) {
+                throw new Error('Official API not configured');
+            }
+            waService = new OfficialApiService(user);
+        } else {
+            waService = global.whatsappInstances.get(userId);
+            if (!waService || !waService.isConnected) {
+                throw new Error('WhatsApp not connected');
+            }
+        }
+
+        // Get contacts
+        let contacts = [];
+        if (campaign.targetType === 'groups' && campaign.targetGroups.length > 0) {
+            const dbContacts = await db.Contact.findAll({
+                where: {
+                    userId,
+                    groupId: campaign.targetGroups,
+                    isBlocked: false
+                }
+            });
+            contacts = dbContacts.map(c => ({
+                phone: c.phone,
+                name: c.name,
+                variables: c.variables || {}
+            }));
+        } else if (campaign.targetContacts && campaign.targetContacts.length > 0) {
+            contacts = campaign.targetContacts.map(phone => ({
+                phone: typeof phone === 'string' ? phone : phone.phone,
+                name: typeof phone === 'object' ? phone.name : '',
+                variables: typeof phone === 'object' ? phone.variables || {} : {}
+            }));
+        }
+
+        // Check blacklist
+        if (campaign.settings?.respectBlacklist) {
+            const blacklist = await db.Blacklist.findAll({
+                where: { userId },
+                attributes: ['phone']
+            });
+            const blacklistedNumbers = blacklist.map(b => b.phone);
+            contacts = contacts.filter(c => !blacklistedNumbers.includes(c.phone));
+        }
+
+        // Remove duplicates
+        if (campaign.settings?.skipDuplicates) {
+            const seen = new Set();
+            contacts = contacts.filter(c => {
+                const phone = c.phone.replace(/\D/g, '');
+                if (seen.has(phone)) return false;
+                seen.add(phone);
+                return true;
+            });
+        }
+
+        if (contacts.length === 0) {
+            throw new Error('No valid contacts found');
+        }
+
+        // Check credits
+        if (process.env.ENABLE_CREDIT_SYSTEM === 'true') {
+            const remainingCredits = user.credits - user.creditsUsed;
+            if (remainingCredits < contacts.length) {
+                throw new Error(`Insufficient credits. Need ${contacts.length}, have ${remainingCredits}`);
+            }
+        }
+
+        // Check daily limit
+        const remainingToday = user.dailyLimit - user.messagesUsedToday;
+        if (remainingToday < contacts.length) {
+            throw new Error(`Daily limit would be exceeded. Can send ${remainingToday} more today.`);
+        }
+
+        // Update campaign
+        await campaign.update({
+            status: 'running',
+            startedAt: new Date(),
+            totalContacts: contacts.length,
+            currentIndex: campaign.currentIndex || 0
+        });
+
+        // Store campaign reference
+        this.runningCampaigns.set(campaignId, {
+            campaign,
+            contacts,
+            waService,
+            user,
+            paused: false
+        });
+
+        // Emit start event
+        this.emitToUser(userId, 'campaign-started', {
+            campaignId,
+            totalContacts: contacts.length
+        });
+
+        // Trigger webhook
+        WebhookService.trigger(userId, 'campaign.started', {
+            campaignId,
+            name: campaign.name,
+            totalContacts: contacts.length
+        });
+
+        // Start processing
+        this.processCampaign(campaignId);
+
+        return { success: true, totalContacts: contacts.length };
+    }
+
+    async processCampaign(campaignId) {
+        const campaignData = this.runningCampaigns.get(campaignId);
+        if (!campaignData) return;
+
+        const { campaign, contacts, waService, user } = campaignData;
+        const settings = campaign.settings || {};
+        const minDelay = settings.minDelay || 3000;
+        const maxDelay = settings.maxDelay || 8000;
+        const batchSize = settings.batchSize || 50;
+        const batchDelay = settings.batchDelay || 60000;
+
+        let sentCount = campaign.sentCount || 0;
+        let failedCount = campaign.failedCount || 0;
+        let currentIndex = campaign.currentIndex || 0;
+
+        console.log(`[Campaign] ${campaignId} - Processing from index ${currentIndex}`);
+
+        for (let i = currentIndex; i < contacts.length; i++) {
+            // Check if paused or cancelled
+            const currentCampaignData = this.runningCampaigns.get(campaignId);
+            if (!currentCampaignData || currentCampaignData.paused) {
+                console.log(`[Campaign] ${campaignId} - Paused at index ${i}`);
+                await campaign.update({
+                    status: 'paused',
+                    currentIndex: i,
+                    pausedAt: new Date()
+                });
+                return;
+            }
+
+            const freshCampaign = await db.Campaign.findByPk(campaignId);
+            if (freshCampaign.status === 'cancelled') {
+                console.log(`[Campaign] ${campaignId} - Cancelled`);
+                this.runningCampaigns.delete(campaignId);
+                return;
+            }
+
+            const contact = contacts[i];
+            const phone = contact.phone.replace(/\D/g, '');
+
+            try {
+                // Process message with variables
+                let message = campaign.message;
+                
+                // Apply spintax
+                if (settings.useSpintax) {
+                    message = this.processSpintax(message);
+                }
+
+                // Replace variables
+                message = this.replaceVariables(message, {
+                    name: contact.name || '',
+                    phone: phone,
+                    ...contact.variables
+                });
+
+                // Send message
+                let result;
+                if (campaign.connectionType === 'official') {
+                    result = await waService.sendMessage(phone, message, {
+                        mediaType: campaign.mediaType,
+                        mediaUrl: campaign.mediaUrl
+                    });
+                } else {
+                    result = await waService.sendMessage(phone, message, {
+                        mediaType: campaign.mediaType !== 'none' ? campaign.mediaType : null,
+                        mediaUrl: campaign.mediaUrl
+                    });
+                }
+
+                // Save message
+                await db.Message.create({
+                    userId: user.id,
+                    campaignId,
+                    phone,
+                    message,
+                    mediaType: campaign.mediaType,
+                    mediaUrl: campaign.mediaUrl,
+                    status: 'sent',
+                    whatsappMessageId: result.messageId,
+                    sentAt: new Date(),
+                    source: 'campaign'
+                });
+
+                sentCount++;
+
+                // Update user stats
+                await user.update({
+                    messagesUsedToday: user.messagesUsedToday + 1,
+                    messagesUsedMonth: user.messagesUsedMonth + 1,
+                    totalMessagesSent: user.totalMessagesSent + 1,
+                    creditsUsed: user.creditsUsed + 1
+                });
+
+                // Emit progress
+                this.emitToUser(user.id, 'campaign-progress', {
+                    campaignId,
+                    phone,
+                    success: true,
+                    sent: sentCount,
+                    failed: failedCount,
+                    total: contacts.length,
+                    progress: ((i + 1) / contacts.length * 100).toFixed(1),
+                    currentIndex: i + 1
+                });
+
+                console.log(`[Campaign] ${campaignId} - Sent ${i + 1}/${contacts.length} to ${phone}`);
+
+            } catch (error) {
+                console.error(`[Campaign] ${campaignId} - Failed to send to ${phone}:`, error.message);
+
+                failedCount++;
+
+                await db.Message.create({
+                    userId: user.id,
+                    campaignId,
+                    phone,
+                    message: campaign.message,
+                    status: 'failed',
+                    errorMessage: error.message,
+                    source: 'campaign'
+                });
+
+                this.emitToUser(user.id, 'campaign-progress', {
+                    campaignId,
+                    phone,
+                    success: false,
+                    error: error.message,
+                    sent: sentCount,
+                    failed: failedCount,
+                    total: contacts.length,
+                    currentIndex: i + 1
+                });
+            }
+
+            // Update campaign progress
+            await campaign.update({
+                sentCount,
+                failedCount,
+                processedCount: i + 1,
+                currentIndex: i + 1,
+                creditsUsed: sentCount
+            });
+
+            // Delay between messages
+            if (i < contacts.length - 1) {
+                const delay = Math.floor(Math.random() * (maxDelay - minDelay + 1)) + minDelay;
+                await this.sleep(delay);
+            }
+
+            // Batch pause
+            if ((i + 1) % batchSize === 0 && i < contacts.length - 1) {
+                console.log(`[Campaign] ${campaignId} - Batch pause for ${batchDelay}ms`);
+                this.emitToUser(user.id, 'campaign-batch-pause', {
+                    campaignId,
+                    message: `Completed ${i + 1} messages. Pausing for ${batchDelay / 1000}s...`
+                });
+                await this.sleep(batchDelay);
+            }
+        }
+
+        // Complete campaign
+        await campaign.update({
+            status: 'completed',
+            completedAt: new Date(),
+            sentCount,
+            failedCount,
+            deliveredCount: sentCount,
+            currentIndex: contacts.length
+        });
+
+        // Clean up
+        this.runningCampaigns.delete(campaignId);
+
+        console.log(`[Campaign] ${campaignId} - Completed. Sent: ${sentCount}, Failed: ${failedCount}`);
+
+        // Emit completion
+        this.emitToUser(user.id, 'campaign-complete', {
+            campaignId,
+            sent: sentCount,
+            failed: failedCount,
+            total: contacts.length
+        });
+
+        // Trigger webhook
+        WebhookService.trigger(user.id, 'campaign.completed', {
+            campaignId,
+            name: campaign.name,
+            sent: sentCount,
+            failed: failedCount,
+            total: contacts.length
+        });
+    }
+
+    async pauseCampaign(campaignId, userId) {
+        const campaignData = this.runningCampaigns.get(campaignId);
+        if (campaignData) {
+            campaignData.paused = true;
+        }
+
+        await db.Campaign.update(
+            { status: 'paused', pausedAt: new Date() },
+            { where: { id: campaignId, userId } }
+        );
+
+        return { success: true };
+    }
+
+    async resumeCampaign(campaignId, userId) {
+        const campaign = await db.Campaign.findOne({
+            where: { id: campaignId, userId }
+        });
+
+        if (!campaign) {
+            throw new Error('Campaign not found');
+        }
+
+        if (campaign.status !== 'paused') {
+            throw new Error('Campaign is not paused');
+        }
+
+        // Restart from where it left off
+        return this.startCampaign(campaignId, userId);
+    }
+
+    async cancelCampaign(campaignId, userId) {
+        this.runningCampaigns.delete(campaignId);
+
+        await db.Campaign.update(
+            { status: 'cancelled', completedAt: new Date() },
+            { where: { id: campaignId, userId } }
+        );
+
+        return { success: true };
+    }
+
+    processSpintax(text) {
+        return text.replace(/\{([^{}]+)\}/g, (match, group) => {
+            const options = group.split('|');
+            return options[Math.floor(Math.random() * options.length)].trim();
+        });
+    }
+
+    replaceVariables(text, variables) {
+        let result = text;
+        for (const [key, value] of Object.entries(variables)) {
+            const regex = new RegExp(`\\{\\{${key}\\}\\}`, 'gi');
+            result = result.replace(regex, value || '');
+        }
+        return result;
+    }
+
+    sleep(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    emitToUser(userId, event, data) {
+        if (global.io) {
+            global.io.to(`user-${userId}`).emit(event, data);
+        }
+    }
+}
+
+module.exports = new CampaignService();

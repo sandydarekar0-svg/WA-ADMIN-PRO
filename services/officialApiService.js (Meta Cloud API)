@@ -1,0 +1,174 @@
+const axios = require('axios');
+const FormData = require('form-data');
+
+class OfficialApiService {
+    constructor(user) {
+        this.user = user;
+        this.accessToken = user.metaAccessToken;
+        this.phoneNumberId = user.metaPhoneNumberId;
+        this.baseUrl = 'https://graph.facebook.com/v18.0';
+    }
+
+    async sendMessage(phone, message, options = {}) {
+        const url = `${this.baseUrl}/${this.phoneNumberId}/messages`;
+
+        // Format phone number
+        let formattedPhone = phone.replace(/\D/g, '');
+        if (!formattedPhone.startsWith('+')) {
+            formattedPhone = formattedPhone;
+        }
+
+        let payload;
+
+        if (options.templateName) {
+            // Template message
+            payload = {
+                messaging_product: 'whatsapp',
+                to: formattedPhone,
+                type: 'template',
+                template: {
+                    name: options.templateName,
+                    language: { code: options.language || 'en' },
+                    components: options.components || []
+                }
+            };
+        } else if (options.mediaType && options.mediaUrl) {
+            // Media message
+            const mediaTypeMap = {
+                'image': 'image',
+                'video': 'video',
+                'document': 'document',
+                'audio': 'audio'
+            };
+
+            payload = {
+                messaging_product: 'whatsapp',
+                to: formattedPhone,
+                type: mediaTypeMap[options.mediaType],
+                [mediaTypeMap[options.mediaType]]: {
+                    link: options.mediaUrl,
+                    caption: message
+                }
+            };
+        } else {
+            // Text message
+            payload = {
+                messaging_product: 'whatsapp',
+                to: formattedPhone,
+                type: 'text',
+                text: { body: message }
+            };
+        }
+
+        try {
+            const response = await axios.post(url, payload, {
+                headers: {
+                    'Authorization': `Bearer ${this.accessToken}`,
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            return {
+                success: true,
+                messageId: response.data.messages?.[0]?.id,
+                timestamp: new Date()
+            };
+        } catch (error) {
+            const errorMessage = error.response?.data?.error?.message || error.message;
+            throw new Error(`Official API Error: ${errorMessage}`);
+        }
+    }
+
+    async sendTemplateMessage(phone, templateName, language, components) {
+        return this.sendMessage(phone, null, {
+            templateName,
+            language,
+            components
+        });
+    }
+
+    async uploadMedia(file, type) {
+        const url = `${this.baseUrl}/${this.phoneNumberId}/media`;
+        
+        const formData = new FormData();
+        formData.append('file', file.buffer, file.originalname);
+        formData.append('messaging_product', 'whatsapp');
+        formData.append('type', type);
+
+        const response = await axios.post(url, formData, {
+            headers: {
+                'Authorization': `Bearer ${this.accessToken}`,
+                ...formData.getHeaders()
+            }
+        });
+
+        return response.data.id;
+    }
+
+    async getTemplates() {
+        const url = `${this.baseUrl}/${this.user.metaBusinessId}/message_templates`;
+        
+        const response = await axios.get(url, {
+            headers: {
+                'Authorization': `Bearer ${this.accessToken}`
+            }
+        });
+
+        return response.data.data;
+    }
+
+    async createTemplate(template) {
+        const url = `${this.baseUrl}/${this.user.metaBusinessId}/message_templates`;
+        
+        const response = await axios.post(url, template, {
+            headers: {
+                'Authorization': `Bearer ${this.accessToken}`,
+                'Content-Type': 'application/json'
+            }
+        });
+
+        return response.data;
+    }
+
+    async deleteTemplate(templateName) {
+        const url = `${this.baseUrl}/${this.user.metaBusinessId}/message_templates`;
+        
+        const response = await axios.delete(url, {
+            headers: {
+                'Authorization': `Bearer ${this.accessToken}`
+            },
+            params: { name: templateName }
+        });
+
+        return response.data;
+    }
+
+    async getPhoneNumbers() {
+        const url = `${this.baseUrl}/${this.user.metaBusinessId}/phone_numbers`;
+        
+        const response = await axios.get(url, {
+            headers: {
+                'Authorization': `Bearer ${this.accessToken}`
+            }
+        });
+
+        return response.data.data;
+    }
+
+    async markAsRead(messageId) {
+        const url = `${this.baseUrl}/${this.phoneNumberId}/messages`;
+        
+        await axios.post(url, {
+            messaging_product: 'whatsapp',
+            status: 'read',
+            message_id: messageId
+        }, {
+            headers: {
+                'Authorization': `Bearer ${this.accessToken}`,
+                'Content-Type': 'application/json'
+            }
+        });
+    }
+}
+
+module.exports = OfficialApiService;

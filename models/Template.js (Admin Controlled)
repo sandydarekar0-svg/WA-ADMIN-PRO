@@ -1,0 +1,122 @@
+module.exports = (sequelize, DataTypes) => {
+    const Template = sequelize.define('Template', {
+        id: {
+            type: DataTypes.UUID,
+            defaultValue: DataTypes.UUIDV4,
+            primaryKey: true
+        },
+        userId: {
+            type: DataTypes.UUID,
+            allowNull: true,
+            comment: 'Null for global templates'
+        },
+        createdBy: {
+            type: DataTypes.UUID,
+            allowNull: false
+        },
+        
+        name: {
+            type: DataTypes.STRING,
+            allowNull: false
+        },
+        slug: {
+            type: DataTypes.STRING,
+            allowNull: true
+        },
+        category: {
+            type: DataTypes.STRING,
+            defaultValue: 'general'
+        },
+        language: {
+            type: DataTypes.STRING,
+            defaultValue: 'en'
+        },
+        
+        // Content
+        content: {
+            type: DataTypes.TEXT,
+            allowNull: false
+        },
+        header: {
+            type: DataTypes.JSON,
+            defaultValue: null,
+            comment: 'For official API templates'
+        },
+        footer: {
+            type: DataTypes.STRING,
+            allowNull: true
+        },
+        buttons: {
+            type: DataTypes.JSON,
+            defaultValue: []
+        },
+        
+        // Media
+        mediaType: {
+            type: DataTypes.ENUM('none', 'image', 'video', 'document', 'audio'),
+            defaultValue: 'none'
+        },
+        mediaUrl: DataTypes.STRING,
+        
+        // Variables
+        variables: {
+            type: DataTypes.JSON,
+            defaultValue: []
+        },
+        sampleVariables: {
+            type: DataTypes.JSON,
+            defaultValue: {}
+        },
+        
+        // Spintax
+        useSpintax: {
+            type: DataTypes.BOOLEAN,
+            defaultValue: false
+        },
+        
+        // Official API
+        isOfficialTemplate: {
+            type: DataTypes.BOOLEAN,
+            defaultValue: false
+        },
+        officialTemplateId: DataTypes.STRING,
+        officialStatus: {
+            type: DataTypes.ENUM('pending', 'approved', 'rejected'),
+            allowNull: true
+        },
+        
+        // Permissions
+        isGlobal: {
+            type: DataTypes.BOOLEAN,
+            defaultValue: false,
+            comment: 'Available to all users'
+        },
+        isEditable: {
+            type: DataTypes.BOOLEAN,
+            defaultValue: false,
+            comment: 'Can users edit this template'
+        },
+        isLocked: {
+            type: DataTypes.BOOLEAN,
+            defaultValue: false,
+            comment: 'Admin locked template'
+        },
+        
+        // Status
+        isActive: {
+            type: DataTypes.BOOLEAN,
+            defaultValue: true
+        },
+        
+        // Stats
+        usageCount: {
+            type: DataTypes.INTEGER,
+            defaultValue: 0
+        }
+    }, {
+        timestamps: true,
+        paranoid: true
+    });
+
+    return Template;
+};

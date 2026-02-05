@@ -1,0 +1,161 @@
+module.exports = (sequelize, DataTypes) => {
+    const Campaign = sequelize.define('Campaign', {
+        id: {
+            type: DataTypes.UUID,
+            defaultValue: DataTypes.UUIDV4,
+            primaryKey: true
+        },
+        userId: {
+            type: DataTypes.UUID,
+            allowNull: false
+        },
+        templateId: DataTypes.UUID,
+        
+        name: {
+            type: DataTypes.STRING,
+            allowNull: false
+        },
+        description: DataTypes.TEXT,
+        
+        // Status
+        status: {
+            type: DataTypes.ENUM(
+                'draft', 'scheduled', 'queued', 'running', 
+                'paused', 'completed', 'failed', 'cancelled'
+            ),
+            defaultValue: 'draft'
+        },
+        
+        // Type
+        type: {
+            type: DataTypes.ENUM('instant', 'scheduled', 'recurring'),
+            defaultValue: 'instant'
+        },
+        connectionType: {
+            type: DataTypes.ENUM('personal', 'official'),
+            defaultValue: 'personal'
+        },
+        
+        // Content
+        message: DataTypes.TEXT,
+        mediaType: {
+            type: DataTypes.ENUM('none', 'image', 'video', 'document'),
+            defaultValue: 'none'
+        },
+        mediaUrl: DataTypes.STRING,
+        
+        // Targeting
+        targetType: {
+            type: DataTypes.ENUM('groups', 'numbers', 'all'),
+            defaultValue: 'numbers'
+        },
+        targetGroups: {
+            type: DataTypes.JSON,
+            defaultValue: []
+        },
+        targetContacts: {
+            type: DataTypes.JSON,
+            defaultValue: []
+        },
+        excludeGroups: {
+            type: DataTypes.JSON,
+            defaultValue: []
+        },
+        
+        // Progress
+        totalContacts: {
+            type: DataTypes.INTEGER,
+            defaultValue: 0
+        },
+        processedCount: {
+            type: DataTypes.INTEGER,
+            defaultValue: 0
+        },
+        sentCount: {
+            type: DataTypes.INTEGER,
+            defaultValue: 0
+        },
+        deliveredCount: {
+            type: DataTypes.INTEGER,
+            defaultValue: 0
+        },
+        readCount: {
+            type: DataTypes.INTEGER,
+            defaultValue: 0
+        },
+        failedCount: {
+            type: DataTypes.INTEGER,
+            defaultValue: 0
+        },
+        
+        // Current Position (for resume)
+        currentIndex: {
+            type: DataTypes.INTEGER,
+            defaultValue: 0
+        },
+        
+        // Scheduling
+        scheduledAt: DataTypes.DATE,
+        startedAt: DataTypes.DATE,
+        completedAt: DataTypes.DATE,
+        pausedAt: DataTypes.DATE,
+        
+        // Recurring
+        recurringPattern: {
+            type: DataTypes.JSON,
+            allowNull: true,
+            comment: '{ type: "daily|weekly|monthly", time: "09:00", days: [1,2,3] }'
+        },
+        lastRunAt: DataTypes.DATE,
+        nextRunAt: DataTypes.DATE,
+        
+        // Settings
+        settings: {
+            type: DataTypes.JSON,
+            defaultValue: {
+                minDelay: 3000,
+                maxDelay: 8000,
+                batchSize: 50,
+                batchDelay: 60000,
+                useSpintax: false,
+                validateNumbers: false,
+                skipDuplicates: true,
+                respectBlacklist: true
+            }
+        },
+        
+        // Error handling
+        errorMessage: DataTypes.TEXT,
+        retryCount: {
+            type: DataTypes.INTEGER,
+            defaultValue: 0
+        },
+        maxRetries: {
+            type: DataTypes.INTEGER,
+            defaultValue: 3
+        },
+        
+        // Credits
+        creditsUsed: {
+            type: DataTypes.INTEGER,
+            defaultValue: 0
+        },
+        
+        // Priority
+        priority: {
+            type: DataTypes.INTEGER,
+            defaultValue: 5,
+            comment: '1=highest, 10=lowest'
+        }
+    }, {
+        timestamps: true,
+        paranoid: true,
+        indexes: [
+            { fields: ['userId'] },
+            { fields: ['status'] },
+            { fields: ['scheduledAt'] }
+        ]
+    });
+
+    return Campaign;
+};
