@@ -1,0 +1,65 @@
+# Server Configuration
+PORT=3000
+NODE_ENV=production
+APP_URL=http://localhost:3000
+
+# Database Configuration
+DB_HOST=localhost
+DB_USER=root
+DB_PASS=your_password
+DB_NAME=whatsapp_enterprise
+
+# JWT Configuration
+JWT_SECRET=your-super-secret-jwt-key-64-characters-long-change-this
+JWT_EXPIRE=7d
+JWT_REFRESH_EXPIRE=30d
+
+# Admin Configuration
+ADMIN_EMAIL=admin@yoursite.com
+ADMIN_PASSWORD=Admin@123456
+
+# WhatsApp Official API (Meta Cloud API)
+META_APP_ID=your_meta_app_id
+META_APP_SECRET=your_meta_app_secret
+META_ACCESS_TOKEN=your_access_token
+META_PHONE_NUMBER_ID=your_phone_number_id
+META_BUSINESS_ID=your_business_id
+META_WEBHOOK_VERIFY_TOKEN=your_webhook_verify_token
+
+# Proxy Configuration
+PROXY_ENABLED=false
+PROXY_TYPE=http
+PROXY_HOST=
+PROXY_PORT=
+PROXY_USERNAME=
+PROXY_PASSWORD=
+
+# Webhook Configuration
+WEBHOOK_SECRET=your-webhook-signing-secret
+WEBHOOK_RETRY_ATTEMPTS=3
+WEBHOOK_RETRY_DELAY=5000
+
+# Rate Limiting
+RATE_LIMIT_WINDOW=60000
+RATE_LIMIT_MAX=100
+
+# Message Settings
+DEFAULT_MIN_DELAY=3000
+DEFAULT_MAX_DELAY=8000
+DEFAULT_BATCH_SIZE=50
+DEFAULT_BATCH_DELAY=60000
+
+# Credit System
+ENABLE_CREDIT_SYSTEM=true
+DEFAULT_FREE_CREDITS=100
+
+# Security
+ENCRYPTION_KEY=your-32-character-encryption-key
+TWO_FACTOR_ISSUER=WhatsAppSender
+
+# Session
+SESSION_PATH=./sessions
+
+# Scheduler
+ENABLE_SCHEDULER=true
+QUOTA_RESET_CRON=0 0 * * *
