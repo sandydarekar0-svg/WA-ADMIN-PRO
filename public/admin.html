@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>Admin Panel | Bulk WhatsApp SaaS</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div class="admin-container">
+        <aside class="sidebar">
+            <h2>Admin Console</h2>
+            <ul>
+                <li>Dashboard</li>
+                <li>User Management</li>
+                <li>Credit Logs</li>
+                <li>System Settings</li>
+            </ul>
+        </aside>
+        <main class="content">
+            <h1>User Management & Credits</h1>
+            <table id="userTable">
+                <thead>
+                    <tr>
+                        <th>Username</th>
+                        <th>Email</th>
+                        <th>Credits Remaining</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="userList">
+                    </tbody>
+            </table>
+        </main>
+    </div>
+
+    <div id="rechargeModal" class="modal">
+        <h3>Add Credits</h3>
+        <input type="number" id="creditAmount" placeholder="Amount of SMS">
+        <button onclick="submitRecharge()">Add Credits</button>
+    </div>
+</body>
+</html>
