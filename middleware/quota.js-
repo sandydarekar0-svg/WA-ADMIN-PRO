@@ -1,0 +1,20 @@
+const User = require('../models/User');
+
+module.exports = async (req, res, next) => {
+    try {
+        const user = await User.findById(req.user.id);
+        
+        // Admin check: If user is admin, bypass quota
+        if (user.role === 'admin') return next();
+
+        if (user.credits <= 0) {
+            return res.status(403).json({ 
+                error: "Quota Exceeded", 
+                message: "Please contact Admin to recharge your credits." 
+            });
+        }
+        next();
+    } catch (error) {
+        res.status(500).json({ error: "Internal server error" });
+    }
+};
